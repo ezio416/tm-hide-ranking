@@ -1,57 +1,122 @@
 // c 2024-01-05
 // m 2024-01-05
 
-string title = Icons::Trophy + " Hide Ranking";
+bool enteringMap = false;
+bool running = false;
+bool settingChanged = false;
+string title = "\\$" + Icons::ListOl + "\\$G Hide Ranking";
 
-[Setting category="General" name="Enabled"]
+[Setting hidden]
 bool S_Enabled = true;
 
 void RenderMenu() {
-    if (UI::MenuItem(title, "", S_Enabled))
+    if (UI::MenuItem(title, "", S_Enabled, !enteringMap)) {
         S_Enabled = !S_Enabled;
+        settingChanged = true;
+    }
 }
 
-bool run = S_Enabled;
+void Main() {
+    bool inMap;
+    bool wasInMap = InMap();
 
-void Update(float) {
-    if (S_Enabled)
-        run = true;
+    while (true) {
+        inMap = InMap();
 
-    if (!run)
+        if (inMap) {
+            if (!wasInMap)
+                OnEnteredMap();
+            else if (settingChanged) {
+                settingChanged = false;
+                startnew(ToggleAllRankingFrames);
+            }
+        } else if (S_Enabled && !running)
+            startnew(ToggleAllRankingFrames);
+
+        wasInMap = inMap;
+
+        yield();
+    }
+}
+
+bool InMap() {
+    CTrackMania@ App = cast<CTrackMania@>(GetApp());
+
+    return App.Editor is null &&
+        App.RootMap !is null &&
+        App.CurrentPlayground !is null &&
+        App.Network !is null &&
+        App.Network.ClientManiaAppPlayground !is null;
+}
+
+void OnEnteredMap() {
+    trace("entering map");
+
+    enteringMap = true;
+    startnew(ToggleAllRankingFrames);
+}
+
+void ToggleAllRankingFrames() {
+    if (running)
         return;
+
+    running = true;
+
+    if (S_Enabled)
+        trace("hiding ranking elements" + (!InMap() ? " once map is loaded" : ""));
+    else
+        trace("showing ranking elements");
+
+    bool wasEnabled = S_Enabled;
 
     CTrackMania@ App = cast<CTrackMania@>(GetApp());
 
-    CTrackManiaNetwork@ Network = cast<CTrackManiaNetwork@>(App.Network);
-    if (Network is null)
-        return;
+    CGameManiaAppPlayground@ CMAP;
+    while (
+        CMAP is null ||
+        CMAP.UILayers.Length == 0 ||
+        App.RootMap is null ||
+        App.CurrentPlayground is null
+    ) {
+        if (!S_Enabled && wasEnabled) {
+            trace("disabled, cancelling operation");
+            enteringMap = false;
+            running = false;
+            return;  // disabled when not in a map, cancel
+        }
+        try { @CMAP = App.Network.ClientManiaAppPlayground; } catch { }
+        yield();  // wait until we're in a map to continue
+    }
 
-    CTrackManiaNetworkServerInfo@ ServerInfo = cast<CTrackManiaNetworkServerInfo@>(Network.ServerInfo);
-    if (ServerInfo is null || !ServerInfo.CurGameModeStr.EndsWith("_Local"))
+    CTrackManiaNetworkServerInfo@ ServerInfo;
+    try { @ServerInfo = cast<CTrackManiaNetworkServerInfo@>(App.Network.ServerInfo); } catch { }
+    if (ServerInfo is null || !ServerInfo.CurGameModeStr.EndsWith("_Local")) {
+        trace("ServerInfo is null or we're not playing local, cancelling operation");
+        enteringMap = false;
+        running = false;
         return;
-
-    CGameManiaAppPlayground@ CMAP = Network.ClientManiaAppPlayground;
-    if (CMAP is null)
-        return;
-
-    CGamePlaygroundUIConfig@ Config = CMAP.UI;
-    if (Config is null)
-        return;
-
-    CGamePlaygroundClientScriptAPI@ ScriptAPI = Network.PlaygroundClientScriptAPI;
-    if (ScriptAPI is null)
-        return;
-
-    if (
-        !ScriptAPI.IsInGameMenuDisplayed &&
-        Config.UISequence != CGamePlaygroundUIConfig::EUISequence::EndRound &&
-        Config.UISequence != CGamePlaygroundUIConfig::EUISequence::RollingBackgroundIntro
-    )
-        return;
+    }
 
     CGameUILayer@ StartRaceMenu;
     CGameUILayer@ PauseMenu;
     CGameUILayer@ EndRaceMenu;
+
+    if (enteringMap) {
+        enteringMap = false;
+
+        while (CMAP.UI is null || CMAP.UI.UISequence != CGamePlaygroundUIConfig::EUISequence::RollingBackgroundIntro) {
+            if (!S_Enabled && wasEnabled) {
+                trace("disabled, cancelling operation");
+                enteringMap = false;
+                running = false;
+                return;
+            }
+            yield();  // wait until StartRaceMenu loads
+        }
+    }
+
+    while (CMAP.UILayers.Length < 23)
+        yield();  // wait in case UI hasn't populated
 
     for (uint i = 0; i < CMAP.UILayers.Length; i++) {
         if (StartRaceMenu !is null && PauseMenu !is null && EndRaceMenu !is null)
@@ -61,41 +126,63 @@ void Update(float) {
         if (Layer is null)
             continue;
 
-        string Page = string(Layer.ManialinkPage).Trim().SubStr(0, 64);
+        string Page = string(Layer.ManialinkPage).Trim().SubStr(26, 22);
 
-        if (Page.StartsWith("<manialink name=\"UIModule_Campaign_StartRaceMenu")) {
+        if (Page == "Campaign_StartRaceMenu") {
             @StartRaceMenu = Layer;
             continue;
         }
 
-        if (Page.StartsWith("<manialink name=\"UIModule_Campaign_PauseMenu")) {
+        if (Page.StartsWith("Campaign_PauseMenu")) {
             @PauseMenu = Layer;
             continue;
         }
 
-        if (Page.StartsWith("<manialink name=\"UIModule_Campaign_EndRaceMenu")) {
+        if (Page.StartsWith("Campaign_EndRaceMenu")) {
             @EndRaceMenu = Layer;
             continue;
         }
     }
 
-    if (StartRaceMenu is null && PauseMenu is null && EndRaceMenu is null) {
-        warn("UI layers not found!");
+    if (StartRaceMenu is null) {
+        warn("StartRaceMenu null!");
+        running = false;
+        return;
+    }
+
+    if (PauseMenu is null) {
+        warn("PauseMenu null!");
+        running = false;
+        return;
+    }
+
+    if (EndRaceMenu is null) {
+        warn("EndRaceMenu null!");
+        running = false;
         return;
     }
 
     ToggleRankingFrame(StartRaceMenu.LocalPage);
     ToggleRankingFrame(PauseMenu.LocalPage);
     ToggleRankingFrame(EndRaceMenu.LocalPage);
+
+    trace("success " + (S_Enabled ? "hid" : "show") + "ing ranking elements");
+
+    running = false;
 }
 
 void ToggleRankingFrame(CGameManialinkPage@ Page) {
-    if (Page !is null) {
-        CGameManialinkFrame@ Frame = cast<CGameManialinkFrame@>(Page.GetFirstChild("ComponentRaceMapInfos_frame-rankings"));
+    yield();
 
-        if (Frame !is null)
-            Frame.Visible = !S_Enabled;
+    if (Page is null) {
+        warn("Page is null!");
+        return;
     }
 
-    run = S_Enabled;
+    CGameManialinkFrame@ Frame = cast<CGameManialinkFrame@>(Page.GetFirstChild("ComponentRaceMapInfos_frame-rankings"));
+
+    if (Frame is null)
+        warn("Frame is null!");
+    else
+        Frame.Visible = !S_Enabled;
 }
