@@ -18,9 +18,7 @@ void RenderMenu() {
     }
 }
 
-void OnDestroyed() {
-    OnDisabled();
-}
+void OnDestroyed() { OnDisabled(); }
 void OnDisabled() {
     if (InMap() && S_Enabled) {
         trace("plugin disabled, cleaning up");
@@ -53,7 +51,6 @@ void Main() {
                 OnEnteredMap();
             else if (settingChanged) {
                 settingChanged = false;
-                print("3");
                 startnew(ToggleAllRankingFrames);
             }
         } else if (S_Enabled && !running)
@@ -85,12 +82,20 @@ void OnEnteredMap() {
 void ToggleAllRankingFrames() {
     if (running) {
         if (!cleanup)
-            yield();
+            yield();  // helps it not get called too much when not in a map
 
         return;
     }
 
     running = true;
+
+    CTrackMania@ App = cast<CTrackMania@>(GetApp());
+
+    if (App.Editor !is null) {
+        enteringMap = false;
+        running = false;
+        return;
+    }
 
     if (S_Enabled)
         trace("hiding ranking elements" + (!InMap() ? " once map is loaded" : ""));
@@ -98,8 +103,6 @@ void ToggleAllRankingFrames() {
         trace("showing ranking elements");
 
     bool wasEnabled = S_Enabled;
-
-    CTrackMania@ App = cast<CTrackMania@>(GetApp());
 
     CGameManiaAppPlayground@ CMAP;
     try { @CMAP = App.Network.ClientManiaAppPlayground; } catch { }
