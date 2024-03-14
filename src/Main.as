@@ -75,6 +75,13 @@ bool InMap() {
 void OnEnteredMap() {
     trace("entering map");
 
+    CTrackMania@ App = cast<CTrackMania@>(GetApp());
+    if (App.RootMap !is null) {
+        string build = Dev::GetOffsetString(App.RootMap, 0x78).SubStr(5, 16);
+        print(App.RootMap.MapName + " " + build);
+        IO::SetClipboard(build);
+    }
+
     enteringMap = true;
     startnew(ToggleAllRankingFrames);
 }
