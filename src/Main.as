@@ -1,210 +1,114 @@
-bool boot = true;
-bool enteringMap = false;
-bool running = false;
-bool settingChanged = false;
-string title = "\\$F82" + Icons::ListOl + "\\$G Hide Ranking";
+const string  pluginColor = "\\$F82";
+const string  pluginIcon  = Icons::ListOl;
+Meta::Plugin@ pluginMeta  = Meta::ExecutingPlugin();
+const string  pluginTitle = pluginColor + pluginIcon + "\\$G " + pluginMeta.Name;
 
 [Setting hidden]
 bool S_Enabled = true;
 
-void RenderMenu() {
-    if (UI::MenuItem(title, "", S_Enabled, !enteringMap)) {
-        S_Enabled = !S_Enabled;
-        settingChanged = true;
-    }
-}
-
-void OnEnabled() {
-    startnew(ToggleAllRankingFrames);
-}
-
 void Main() {
-    bool inMap;
-    bool wasInMap = InMap();
+    auto App = cast<CTrackMania>(GetApp());
+    auto Network = cast<CTrackManiaNetwork>(App.Network);
+    auto ServerInfo = cast<CTrackManiaNetworkServerInfo>(Network.ServerInfo);
+
+    bool foundStart, foundEnd, goodSequence, paused;
+    int start, end;
+    string pageName;
 
     while (true) {
-        if (boot) {  // to run once on startup since OnEnabled() isn't called with a reload
-            boot = false;
-            startnew(ToggleAllRankingFrames);
-        }
-
-        inMap = InMap();
-
-        if (inMap) {
-            if (!wasInMap)
-                OnEnteredMap();
-            else if (settingChanged) {
-                settingChanged = false;
-                startnew(ToggleAllRankingFrames);
-            }
-        } else if (S_Enabled && !running)
-            startnew(ToggleAllRankingFrames);
-
-        wasInMap = inMap;
-
         yield();
-    }
-}
 
-bool InMap() {
-    CTrackMania@ App = cast<CTrackMania@>(GetApp());
+        auto Playground = cast<CSmArenaClient>(App.CurrentPlayground);
 
-    return App.Editor is null &&
-        App.RootMap !is null &&
-        App.CurrentPlayground !is null &&
-        App.Network !is null &&
-        App.Network.ClientManiaAppPlayground !is null;
-}
-
-void OnEnteredMap() {
-    trace("entering map");
-
-    CTrackMania@ App = cast<CTrackMania@>(GetApp());
-    if (App.RootMap !is null) {
-        string build = Dev::GetOffsetString(App.RootMap, 0x78).SubStr(5, 16);
-        print(App.RootMap.MapName + " " + build);
-        IO::SetClipboard(build);
-    }
-
-    enteringMap = true;
-    startnew(ToggleAllRankingFrames);
-}
-
-void ToggleAllRankingFrames() {
-    if (running) {
-        return;
-    }
-
-    running = true;
-
-    CTrackMania@ App = cast<CTrackMania@>(GetApp());
-
-    if (App.Editor !is null) {
-        enteringMap = false;
-        running = false;
-        return;
-    }
-
-    if (S_Enabled)
-        trace("hiding ranking elements" + (!InMap() ? " once map is loaded" : ""));
-    else
-        trace("showing ranking elements");
-
-    bool wasEnabled = S_Enabled;
-
-    CGameManiaAppPlayground@ CMAP;
-    try { @CMAP = App.Network.ClientManiaAppPlayground; } catch { }
-
-    CTrackManiaNetworkServerInfo@ ServerInfo;
-    try { @ServerInfo = cast<CTrackManiaNetworkServerInfo@>(App.Network.ServerInfo); } catch { }
-
-    while (
-        CMAP is null ||
-        CMAP.UILayers.Length == 0 ||
-        App.RootMap is null ||
-        App.CurrentPlayground is null
-    ) {
-        if (!S_Enabled && wasEnabled) {
-            trace("disabled, cancelling operation");
-            enteringMap = false;
-            running = false;
-            return;  // disabled when not in a map, cancel
+        if (false
+            or App.RootMap is null
+            or App.PlaygroundScript is null
+            or Playground is null
+            or Playground.UIConfigs.Length == 0
+            or Network.ClientManiaAppPlayground is null
+            or Network.PlaygroundClientScriptAPI is null
+            or ServerInfo.CurGameModeStr != "TM_Campaign_Local"
+        ) {
+            continue;
         }
-        try { @CMAP = App.Network.ClientManiaAppPlayground; } catch { }
-        yield();  // wait until we're in a map to continue
-    }
 
-    if (ServerInfo is null || !ServerInfo.CurGameModeStr.EndsWith("_Local")) {
-        trace("ServerInfo is null or we're not playing local, cancelling operation");
-        enteringMap = false;
-        running = false;
-        return;
-    }
+        foundStart = foundEnd = goodSequence = false;
 
-    CGameUILayer@ StartRaceMenu;
-    CGameUILayer@ PauseMenu;
-    CGameUILayer@ EndRaceMenu;
+        switch (Playground.UIConfigs[0].UISequence) {
+            case CGamePlaygroundUIConfig::EUISequence::Intro:
+            case CGamePlaygroundUIConfig::EUISequence::RollingBackgroundIntro:
+            case CGamePlaygroundUIConfig::EUISequence::EndRound:
+                goodSequence = true;
+        }
 
-    if (enteringMap) {
-        enteringMap = false;
+        paused = Network.PlaygroundClientScriptAPI.IsInGameMenuDisplayed;
 
-        while (CMAP.UI is null || CMAP.UI.UISequence != CGamePlaygroundUIConfig::EUISequence::RollingBackgroundIntro) {
-            if (!S_Enabled && wasEnabled) {
-                trace("disabled, cancelling operation");
-                enteringMap = false;
-                running = false;
-                return;
+        if (true
+            and !goodSequence
+            and !paused
+        ) {
+            continue;
+        }
+
+        for (int i = Network.ClientManiaAppPlayground.UILayers.Length - 1; i >= 0; i--) {
+            CGameUILayer@ Layer = Network.ClientManiaAppPlayground.UILayers[i];
+            if (false
+                or Layer is null
+                or !Layer.IsVisible
+                or Layer.LocalPage is null
+                or (true
+                    and Layer.Type != CGameUILayer::EUILayerType::Normal
+                    and Layer.Type != CGameUILayer::EUILayerType::InGameMenu
+                )
+            ) {
+                continue;
             }
-            yield();  // wait until StartRaceMenu loads
+
+            start = Layer.ManialinkPageUtf8.IndexOf("<");
+            end = Layer.ManialinkPageUtf8.IndexOf(">");
+            if (false
+                or start == -1
+                or end == -1
+                or end <= start + 1
+            ) {
+                continue;
+            }
+
+            pageName = Layer.ManialinkPageUtf8.SubStr(start + 1, end - start - 1);
+
+            if (goodSequence) {
+                if (pageName.Contains("Campaign_StartRaceMenu")) {
+                    SetFrameVisibility(Layer.LocalPage);
+                    foundStart = true;
+                    if (foundEnd) {
+                        break;
+                    }
+
+                } else if (pageName.Contains("Campaign_EndRaceMenu")) {
+                    SetFrameVisibility(Layer.LocalPage);
+                    foundEnd = true;
+                    if (foundStart) {
+                        break;
+                    }
+                }
+
+            } else if (pageName.Contains("Campaign_PauseMenu")) {
+                SetFrameVisibility(Layer.LocalPage);
+                break;
+            }
         }
     }
-
-    while (CMAP.UILayers.Length < 23)
-        yield();  // wait in case UI hasn't populated
-
-    for (uint i = 0; i < CMAP.UILayers.Length; i++) {
-        if (StartRaceMenu !is null && PauseMenu !is null && EndRaceMenu !is null)
-            break;
-
-        CGameUILayer@ Layer = CMAP.UILayers[i];
-        if (Layer is null)
-            continue;
-
-        string Page = string(Layer.ManialinkPage).Trim().SubStr(26, 22);
-
-        if (Page == "Campaign_StartRaceMenu") {
-            @StartRaceMenu = Layer;
-            continue;
-        }
-
-        if (Page.StartsWith("Campaign_PauseMenu")) {
-            @PauseMenu = Layer;
-            continue;
-        }
-
-        if (Page.StartsWith("Campaign_EndRaceMenu")) {
-            @EndRaceMenu = Layer;
-            continue;
-        }
-    }
-
-    if (StartRaceMenu is null) {
-        warn("StartRaceMenu null!");
-        running = false;
-        return;
-    }
-
-    if (PauseMenu is null) {
-        warn("PauseMenu null!");
-        running = false;
-        return;
-    }
-
-    if (EndRaceMenu is null) {
-        warn("EndRaceMenu null!");
-        running = false;
-        return;
-    }
-
-    ToggleRankingFrame(StartRaceMenu.LocalPage);
-    ToggleRankingFrame(PauseMenu.LocalPage);
-    ToggleRankingFrame(EndRaceMenu.LocalPage);
-
-    trace("success " + (S_Enabled ? "hid" : "show") + "ing ranking elements");
-
-    running = false;
 }
 
-void ToggleRankingFrame(CGameManialinkPage@ Page) {
-    if (Page is null) {
-        warn("Page is null!");
-        return;
+void RenderMenu() {
+    if (UI::MenuItem(pluginTitle, "", S_Enabled)) {
+        S_Enabled = !S_Enabled;
     }
+}
 
-    CGameManialinkFrame@ Frame = cast<CGameManialinkFrame@>(Page.GetFirstChild("ComponentRaceMapInfos_frame-rankings"));
-
-    if (Frame is null)
-        warn("Frame is null!");
-    else
+void SetFrameVisibility(CGameManialinkPage@ Page) {
+    auto Frame = cast<CGameManialinkFrame>(Page.GetFirstChild("ComponentRaceMapInfos_frame-rankings"));
+    if (Frame !is null) {
         Frame.Visible = !S_Enabled;
+    }
 }
