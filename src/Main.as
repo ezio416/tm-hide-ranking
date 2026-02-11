@@ -1,6 +1,3 @@
-// c 2024-01-05
-// m 2024-01-05
-
 bool boot = true;
 bool enteringMap = false;
 bool cleanup = false;
