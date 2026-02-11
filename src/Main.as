@@ -1,6 +1,5 @@
 bool boot = true;
 bool enteringMap = false;
-bool cleanup = false;
 bool running = false;
 bool settingChanged = false;
 string title = "\\$F82" + Icons::ListOl + "\\$G Hide Ranking";
@@ -15,19 +14,7 @@ void RenderMenu() {
     }
 }
 
-void OnDestroyed() { OnDisabled(); }
-void OnDisabled() {
-    if (InMap() && S_Enabled) {
-        trace("plugin disabled, cleaning up");
-        cleanup = true;
-        bool wasEnabled = S_Enabled;
-        S_Enabled = false;
-        ToggleAllRankingFrames();  // can't yield here so have to run it this way
-        S_Enabled = wasEnabled;
-    }
-}
 void OnEnabled() {
-    cleanup = false;  // for some reason this persists after disabling plugin
     startnew(ToggleAllRankingFrames);
 }
 
@@ -85,9 +72,6 @@ void OnEnteredMap() {
 
 void ToggleAllRankingFrames() {
     if (running) {
-        if (!cleanup)
-            yield();  // helps it not get called too much when not in a map
-
         return;
     }
 
@@ -114,22 +98,20 @@ void ToggleAllRankingFrames() {
     CTrackManiaNetworkServerInfo@ ServerInfo;
     try { @ServerInfo = cast<CTrackManiaNetworkServerInfo@>(App.Network.ServerInfo); } catch { }
 
-    if (!cleanup) {
-        while (
-            CMAP is null ||
-            CMAP.UILayers.Length == 0 ||
-            App.RootMap is null ||
-            App.CurrentPlayground is null
-        ) {
-            if (!S_Enabled && wasEnabled) {
-                trace("disabled, cancelling operation");
-                enteringMap = false;
-                running = false;
-                return;  // disabled when not in a map, cancel
-            }
-            try { @CMAP = App.Network.ClientManiaAppPlayground; } catch { }
-            yield();  // wait until we're in a map to continue
+    while (
+        CMAP is null ||
+        CMAP.UILayers.Length == 0 ||
+        App.RootMap is null ||
+        App.CurrentPlayground is null
+    ) {
+        if (!S_Enabled && wasEnabled) {
+            trace("disabled, cancelling operation");
+            enteringMap = false;
+            running = false;
+            return;  // disabled when not in a map, cancel
         }
+        try { @CMAP = App.Network.ClientManiaAppPlayground; } catch { }
+        yield();  // wait until we're in a map to continue
     }
 
     if (ServerInfo is null || !ServerInfo.CurGameModeStr.EndsWith("_Local")) {
@@ -143,24 +125,22 @@ void ToggleAllRankingFrames() {
     CGameUILayer@ PauseMenu;
     CGameUILayer@ EndRaceMenu;
 
-    if (!cleanup) {
-        if (enteringMap) {
-            enteringMap = false;
+    if (enteringMap) {
+        enteringMap = false;
 
-            while (CMAP.UI is null || CMAP.UI.UISequence != CGamePlaygroundUIConfig::EUISequence::RollingBackgroundIntro) {
-                if (!S_Enabled && wasEnabled) {
-                    trace("disabled, cancelling operation");
-                    enteringMap = false;
-                    running = false;
-                    return;
-                }
-                yield();  // wait until StartRaceMenu loads
+        while (CMAP.UI is null || CMAP.UI.UISequence != CGamePlaygroundUIConfig::EUISequence::RollingBackgroundIntro) {
+            if (!S_Enabled && wasEnabled) {
+                trace("disabled, cancelling operation");
+                enteringMap = false;
+                running = false;
+                return;
             }
+            yield();  // wait until StartRaceMenu loads
         }
-
-        while (CMAP.UILayers.Length < 23)
-            yield();  // wait in case UI hasn't populated
     }
+
+    while (CMAP.UILayers.Length < 23)
+        yield();  // wait in case UI hasn't populated
 
     for (uint i = 0; i < CMAP.UILayers.Length; i++) {
         if (StartRaceMenu !is null && PauseMenu !is null && EndRaceMenu !is null)
